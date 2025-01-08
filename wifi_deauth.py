@@ -107,8 +107,11 @@ def scan_networks(interface, scan_duration, debug_log="debug.log"):
     time.sleep(scan_duration)
 
     print("[DEBUG] Stopping airodump-ng process...")
-    subprocess.run("kill $(pgrep airodump-ng)", shell=True, check=True)
-    stdout, stderr = process.communicate()
+    try:
+        subprocess.run("pkill -f airodump-ng", shell=True, check=True)
+    except subprocess.CalledProcessError as e:
+        print("[ERROR] No airodump-ng process to terminate or another issue occurred.")
+        stdout, stderr = process.communicate()
 
     if stderr:
         err_text = stderr.decode('utf-8', errors='ignore')
@@ -129,31 +132,49 @@ def scan_networks(interface, scan_duration, debug_log="debug.log"):
 def parse_networks_csv(file_path, debug_log="debug.log"):
     """
     Parse the airodump-ng CSV file to extract information about networks (BSSID, channel, SSID).
-    Return a list of dicts with keys: 'bssid', 'channel', 'ssid'.
+    Determine the band (2.4 GHz or 5 GHz) based on the channel number.
+    Return a list of dicts with keys: 'bssid', 'channel', 'ssid', 'band'.
     """
     networks = []
     try:
         with open(file_path, "r", encoding="utf-8") as csvfile:
             reader = csv.reader(csvfile)
             for row in reader:
+                # Skip rows with fewer columns than expected
                 if len(row) < 14:
                     continue
+                # Skip headers
                 if row[0].strip() in ["BSSID", "Station MAC"]:
-                    # skip header or client lines
                     continue
                 
+                # Parse relevant fields
                 bssid = row[0].strip()
                 try:
-                    channel = int(row[3].strip())
+                    channel = int(row[3].strip())  # Parse channel as an integer
                 except ValueError:
+                    # Skip rows with invalid channel values
                     continue
                 ssid = row[13].strip()
 
-                if bssid and channel > 0 and ssid != "":
+                # Determine the band
+                if 1 <= channel <= 14:
+                    band = "2.4 GHz"
+                elif 36 <= channel <= 165:
+                    band = "5 GHz"
+                else:
+                    band = "Unknown"  # For unexpected channel values
+
+                # Debugging: Log each parsed row
+                with open(debug_log, "a", encoding="utf-8") as f:
+                    f.write(f"[DEBUG] Parsed Row - BSSID: {bssid}, Channel: {channel}, SSID: {ssid}, Band: {band}\n")
+
+                # Include networks with valid BSSID, channel, and SSID
+                if bssid and ssid:  # Allow any valid channel
                     networks.append({
                         "bssid": bssid,
                         "channel": channel,
-                        "ssid": ssid
+                        "ssid": ssid,
+                        "band": band
                     })
     except FileNotFoundError:
         print(f"[DEBUG] CSV file not found: {file_path}")
@@ -183,7 +204,10 @@ def scan_clients(bssid, channel, interface, scan_duration, debug_log="debug.log"
     time.sleep(scan_duration)
 
     print("[DEBUG] Stopping airodump-ng process...")
-    subprocess.run("kill $(pgrep airodump-ng)", shell=True, check=True)
+    try:
+        subprocess.run("pkill -f airodump-ng", shell=True, check=True)
+    except subprocess.CalledProcessError as e:
+        print("[ERROR] No airodump-ng process to terminate or another issue occurred.")
     stdout, stderr = process.communicate()
 
     if stderr:
